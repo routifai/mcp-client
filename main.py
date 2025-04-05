@@ -125,36 +125,50 @@ class MCPClient:
             self.logger.error(f"Failed to call LLM: {str(e)}")
             raise ToolExecutionError(f"Failed to call LLM: {str(e)}")
 
-    async def process_query(self, query: str) -> str:
-        """Process a query using Claude and available tools"""
+    async def process_query(self, query: str):
+        """Process a query using Claude and available tools, yielding each message as it's created"""
         try:
             self.logger.info(
                 f"Processing new query: {query[:100]}..."
             )  # Log first 100 chars of query
 
-            self.messages.append({"role": "user", "content": query})
-            final_text = []
+            # Yield the initial user message
+            user_message = {"role": "user", "content": query}
+            self.messages.append(user_message)
+            yield user_message
 
             while True:
                 self.logger.debug("Calling Claude API")
                 response = await self.call_llm()
 
+                # If it's a simple text response
                 if response.content[0].type == "text" and len(response.content) == 1:
-                    final_text.append(response.content[0].text)
-                    self.messages.append(
-                        {"role": "assistant", "content": response.content[0].text}
-                    )
+                    assistant_message = {
+                        "role": "assistant", 
+                        "content": response.content[0].text
+                    }
+                    self.messages.append(assistant_message)
+                    yield assistant_message
                     self.log_conversation()
                     break
 
-                self.messages.append(
-                    {"role": "assistant", "content": response.to_dict()["content"]}
-                )
+                # For more complex responses with tool calls
+                assistant_message = {
+                    "role": "assistant",
+                    "content": response.to_dict()["content"]
+                }
+                self.messages.append(assistant_message)
+                yield assistant_message
                 self.log_conversation()
 
                 for content in response.content:
                     if content.type == "text":
-                        final_text.append(content.text)
+                        # Text content within a complex response
+                        text_message = {
+                            "role": "assistant",
+                            "content": content.text
+                        }
+                        yield text_message
                     elif content.type == "tool_use":
                         tool_name = content.name
                         tool_args = content.input
@@ -167,18 +181,18 @@ class MCPClient:
                             # turn this one return a simple string
                             # result = await self.session.call_tool(tool_name, tool_args)
                             result = test_tool_result_content
-                            self.messages.append(
-                                {
-                                    "role": "user",
-                                    "content": [
-                                        {
-                                            "type": "tool_result",
-                                            "tool_use_id": tool_use_id,
-                                            "content": result,
-                                        }
-                                    ],
-                                }
-                            )
+                            tool_result_message = {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "tool_result",
+                                        "tool_use_id": tool_use_id,
+                                        "content": result,
+                                    }
+                                ],
+                            }
+                            self.messages.append(tool_result_message)
+                            yield tool_result_message
                         except Exception as e:
                             error_msg = f"Tool execution failed: {str(e)}"
                             self.logger.error(error_msg)
@@ -186,7 +200,6 @@ class MCPClient:
 
                 self.log_conversation()
 
-            return "\n".join(final_text)
         except Exception as e:
             self.logger.error(f"Error processing query: {str(e)}")
             self.logger.debug(
@@ -219,8 +232,26 @@ class MCPClient:
                     self.logger.info("User requested to quit")
                     break
 
-                response = await self.process_query(query)
-                print("\n" + response)
+                async for message in self.process_query(query):
+                    if message["role"] == "user" and type(message["content"]) == str:
+                        print(f"\nUser: {message['content']}")
+                    elif message["role"] == "user" and type(message["content"]) == list:
+                        for content in message["content"]:
+                            if content["type"] == "text":
+                                print(f"\nUser: {content['text']}")
+                            elif content["type"] == "tool_result":
+                                print(f"\nTool result ({content['tool_use_id']}):")
+                                print(content["content"])
+                    elif message["role"] == "assistant" and type(message["content"]) == str:
+                        print(f"\nAssistant: {message['content']}")
+                    elif message["role"] == "assistant" and type(message["content"]) == list:
+                        for content in message["content"]:
+                            if content["type"] == "text":
+                                print(f"\nAssistant: {content['text']}")
+                            elif content["type"] == "tool_use":
+                                print(f"\nAssistant using tool: {content['name']}")
+                                print(f"With args: {content['input']}")
+
                 self.log_conversation()
 
             except KeyboardInterrupt:
@@ -267,6 +298,7 @@ async def main():
 
     if st.session_state["server_connected"]:
         client = get_client()
+        # Display existing messages
         for message in client.messages:
             if message["role"] == "user" and type(message["content"]) == str:
                 st.chat_message("user").markdown(message["content"])
@@ -288,12 +320,32 @@ async def main():
                         with st.chat_message("assistant"):
                             st.write("using tool: " + content["name"])
                             st.write("with args: " + str(content["input"]))
+        
+        # Handle new query
         query = st.chat_input("Enter your query here")
         if query:
-            st.chat_message("user").markdown(query)
-            response = await client.process_query(query)
-            with st.chat_message("assistant"):
-                st.write(response)
+            # Process query and display messages as they are generated
+            async for message in client.process_query(query):
+                if message["role"] == "user" and type(message["content"]) == str:
+                    st.chat_message("user").markdown(message["content"])
+                elif message["role"] == "user" and type(message["content"]) == list:
+                    for content in message["content"]:
+                        if content["type"] == "text":
+                            st.chat_message("user").markdown(content["text"])
+                        elif content["type"] == "tool_result":
+                            with st.chat_message("user"):
+                                st.write("Result from tool: " + content["tool_use_id"])
+                                st.json({"content": content["content"]}, expanded=False)
+                elif message["role"] == "assistant" and type(message["content"]) == str:
+                    st.chat_message("assistant").markdown(message["content"])
+                elif message["role"] == "assistant" and type(message["content"]) == list:
+                    for content in message["content"]:
+                        if content["type"] == "text":
+                            st.chat_message("assistant").markdown(content["text"])
+                        elif content["type"] == "tool_use":
+                            with st.chat_message("assistant"):
+                                st.write("using tool: " + content["name"])
+                                st.write("with args: " + str(content["input"]))
 
     if len(sys.argv) < 2:
         logger.error("No server script path provided")
