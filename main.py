@@ -1,6 +1,11 @@
 import asyncio
+import json
+import logging
 from typing import Optional
 from contextlib import AsyncExitStack
+import sys
+import traceback
+from datetime import datetime
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -8,7 +13,33 @@ from mcp.client.stdio import stdio_client
 from anthropic import Anthropic
 from dotenv import load_dotenv
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler("mcp_client.log"), logging.StreamHandler(sys.stdout)],
+)
+logger = logging.getLogger("MCPClient")
+
 load_dotenv()  # load environment variables from .env
+
+
+class MCPClientError(Exception):
+    """Base exception class for MCPClient errors"""
+
+    pass
+
+
+class ConnectionError(MCPClientError):
+    """Raised when there are connection issues"""
+
+    pass
+
+
+class ToolExecutionError(MCPClientError):
+    """Raised when there are issues executing tools"""
+
+    pass
 
 
 class MCPClient:
@@ -19,110 +50,148 @@ class MCPClient:
         self.llm = Anthropic()
         self.tools = []
         self.messages = []
+        self.logger = logging.getLogger("MCPClient")
 
-    # methods will go here
     async def connect_to_server(self, server_script_path: str):
         """Connect to an MCP server
 
         Args:
             server_script_path: Path to the server script (.py or .js)
         """
-        is_python = server_script_path.endswith(".py")
-        is_js = server_script_path.endswith(".js")
-        if not (is_python or is_js):
-            raise ValueError("Server script must be a .py or .js file")
+        try:
+            is_python = server_script_path.endswith(".py")
+            is_js = server_script_path.endswith(".js")
+            if not (is_python or is_js):
+                raise ValueError("Server script must be a .py or .js file")
 
-        command = "python" if is_python else "node"
-        server_params = StdioServerParameters(
-            command=command, args=[server_script_path], env=None
-        )
+            self.logger.info(
+                f"Attempting to connect to server using script: {server_script_path}"
+            )
+            command = "python" if is_python else "node"
+            server_params = StdioServerParameters(
+                command=command, args=[server_script_path], env=None
+            )
 
-        stdio_transport = await self.exit_stack.enter_async_context(
-            stdio_client(server_params)
-        )
-        self.stdio, self.write = stdio_transport
-        self.session = await self.exit_stack.enter_async_context(
-            ClientSession(self.stdio, self.write)
-        )
+            stdio_transport = await self.exit_stack.enter_async_context(
+                stdio_client(server_params)
+            )
+            self.stdio, self.write = stdio_transport
+            self.session = await self.exit_stack.enter_async_context(
+                ClientSession(self.stdio, self.write)
+            )
 
-        await self.session.initialize()
-        mcp_tools = await self.get_mcp_tools()
-        self.tools = [
-            {
-                "name": tool.name,
-                "description": tool.description,
-                "input_schema": tool.inputSchema,
-            }
-            for tool in mcp_tools
-        ]
-        print(f"Connected to server with tools: {mcp_tools}")
+            await self.session.initialize()
+            mcp_tools = await self.get_mcp_tools()
+            self.tools = [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "input_schema": tool.inputSchema,
+                }
+                for tool in mcp_tools
+            ]
+            self.logger.info(
+                f"Successfully connected to server. Available tools: {[tool['name'] for tool in self.tools]}"
+            )
+        except Exception as e:
+            self.logger.error(f"Failed to connect to server: {str(e)}")
+            self.logger.debug(f"Connection error details: {traceback.format_exc()}")
+            raise ConnectionError(f"Failed to connect to server: {str(e)}")
 
     async def get_mcp_tools(self):
-        # List available tools
-        response = await self.session.list_tools()
-        tools = response.tools
-        return tools
+        try:
+            response = await self.session.list_tools()
+            tools = response.tools
+            return tools
+        except Exception as e:
+            self.logger.error(f"Failed to get MCP tools: {str(e)}")
+            raise ToolExecutionError(f"Failed to get tools: {str(e)}")
 
     async def process_query(self, query: str) -> str:
         """Process a query using Claude and available tools"""
-        self.messages.append({"role": "user", "content": query})
+        try:
+            self.logger.info(
+                f"Processing new query: {query[:100]}..."
+            )  # Log first 100 chars of query
+            self.messages.append({"role": "user", "content": query})
 
-        final_text = []
+            final_text = []
 
-        while True:
-            # Call Claude API
-            response = self.llm.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=1000,
-                messages=self.messages,
-                tools=self.tools,
-            )
+            while True:
+                self.logger.debug("Calling Claude API")
+                response = self.llm.messages.create(
+                    model="claude-3-5-sonnet-20241022",
+                    max_tokens=1000,
+                    messages=self.messages,
+                    tools=self.tools,
+                )
 
-            if response.content[0].type == "text" and len(response.content) == 1:
-                final_text.append(response.content[0].text)
-                break
-
-            for content in response.content:
-                if content.type == "text":
-                    final_text.append(content.text)
-                    self.messages.append({"role": "assistant", "content": content.text})
-                elif content.type == "tool_use":
-                    tool_name = content.name
-                    tool_args = content.input
-                    result = await self.session.call_tool(tool_name, tool_args)
-                    final_text.append(result.content)
+                if response.content[0].type == "text" and len(response.content) == 1:
+                    final_text.append(response.content[0].text)
                     self.messages.append(
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "tool_result",
-                                    "tool_use_id": content.id,
-                                    "content": result.content,
-                                }
-                            ],
-                        }
+                        {"role": "assistant", "content": response.content[0].text}
                     )
+                    self.log_conversation()
+                    break
 
-    def print_conversation(self):
-        """Print the entire conversation history"""
-        print("\n=== Conversation History ===")
-        for msg in self.messages:
-            role = msg["role"].capitalize()
-            if isinstance(msg["content"], str):
-                content = msg["content"]
-            elif isinstance(msg["content"], list):
-                if any(item.get("type") == "tool_result" for item in msg["content"]):
-                    content = "[Tool Result]"
-                else:
-                    content = "\n".join(
-                        item.text for item in msg["content"] if hasattr(item, "text")
-                    )
-            print(f"\n{role}: {content}")
-        print("\n=========================")
+                self.messages.append(response.to_dict())
+                self.log_conversation()
+
+                for content in response.content:
+                    if content.type == "text":
+                        final_text.append(content.text)
+                    elif content.type == "tool_use":
+                        tool_name = content.name
+                        tool_args = content.input
+                        tool_use_id = content.id
+
+                        self.logger.debug(
+                            f"Executing tool: {tool_name} with args: {tool_args}"
+                        )
+                        try:
+                            result = await self.session.call_tool(tool_name, tool_args)
+                            final_text.append(result.content)
+                            self.messages.append(
+                                {
+                                    "role": "user",
+                                    "content": [
+                                        {
+                                            "type": "tool_result",
+                                            "tool_use_id": tool_use_id,
+                                            "content": result.content,
+                                        }
+                                    ],
+                                }
+                            )
+                        except Exception as e:
+                            error_msg = f"Tool execution failed: {str(e)}"
+                            self.logger.error(error_msg)
+                            raise ToolExecutionError(error_msg)
+
+                self.log_conversation()
+
+            return "\n".join(final_text)
+        except Exception as e:
+            self.logger.error(f"Error processing query: {str(e)}")
+            self.logger.debug(
+                f"Query processing error details: {traceback.format_exc()}"
+            )
+            raise
+
+    def log_conversation(self):
+        """save conversation to a json file"""
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"conversation_{timestamp}.json"
+            with open(filename, "w") as f:
+                json.dump(self.messages, f, indent=2)
+            self.logger.debug(f"Conversation logged to {filename}")
+        except Exception as e:
+            self.logger.error(f"Failed to log conversation: {str(e)}")
 
     async def chat_loop(self):
         """Run an interactive chat loop"""
+        self.logger.info("Starting chat loop")
         print("\nMCP Client Started!")
         print("Type your queries or 'quit' to exit.")
 
@@ -131,22 +200,37 @@ class MCPClient:
                 query = input("\nQuery: ").strip()
 
                 if query.lower() == "quit":
+                    self.logger.info("User requested to quit")
                     break
 
                 response = await self.process_query(query)
                 print("\n" + response)
-                self.print_conversation()  # Show updated conversation after response
+                self.log_conversation()
 
+            except KeyboardInterrupt:
+                self.logger.info("Received keyboard interrupt")
+                print("\nShutting down gracefully...")
+                break
             except Exception as e:
+                self.logger.error(f"Error in chat loop: {str(e)}")
+                self.logger.debug(f"Chat loop error details: {traceback.format_exc()}")
                 print(f"\nError: {str(e)}")
+                print("Type 'quit' to exit or try another query")
 
     async def cleanup(self):
         """Clean up resources"""
-        await self.exit_stack.aclose()
+        try:
+            self.logger.info("Cleaning up resources")
+            await self.exit_stack.aclose()
+        except Exception as e:
+            self.logger.error(f"Error during cleanup: {str(e)}")
 
 
 async def main():
+    logger.info("Starting MCP Client application")
+
     if len(sys.argv) < 2:
+        logger.error("No server script path provided")
         print("Usage: python client.py <path_to_server_script>")
         sys.exit(1)
 
@@ -154,11 +238,13 @@ async def main():
     try:
         await client.connect_to_server(sys.argv[1])
         await client.chat_loop()
+    except Exception as e:
+        logger.critical(f"Critical error in main: {str(e)}")
+        logger.debug(f"Main error details: {traceback.format_exc()}")
+        sys.exit(1)
     finally:
         await client.cleanup()
 
 
 if __name__ == "__main__":
-    import sys
-
     asyncio.run(main())
