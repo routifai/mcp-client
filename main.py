@@ -198,7 +198,7 @@ class MCPClient:
         """save conversation to a json file"""
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"conversation_{timestamp}.json"
+            filename = f"conversations/conversation_{timestamp}.json"
             with open(filename, "w") as f:
                 json.dump(self.messages, f, indent=2)
             self.logger.debug(f"Conversation logged to {filename}")
@@ -257,7 +257,7 @@ async def main():
     st.title("MCP Client")
 
     with st.sidebar:
-        server_script_path = st.text_input("Server script path")
+        server_script_path = st.text_input("Server script path", value="/Users/alejandro/repos/code/mcp/documentation/main.py")
         if st.button("Connect"):
             client = get_client()
             server_connected = await client.connect_to_server(server_script_path)
