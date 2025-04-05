@@ -15,6 +15,7 @@ from test_data import test_tool_result_content
 from anthropic import Anthropic
 from anthropic.types import Message
 from dotenv import load_dotenv
+import streamlit as st
 
 # Configure logging
 logging.basicConfig(
@@ -96,6 +97,7 @@ class MCPClient:
             self.logger.info(
                 f"Successfully connected to server. Available tools: {[tool['name'] for tool in self.tools]}"
             )
+            return True
         except Exception as e:
             self.logger.error(f"Failed to connect to server: {str(e)}")
             self.logger.debug(f"Connection error details: {traceback.format_exc()}")
@@ -241,7 +243,36 @@ class MCPClient:
 
 
 async def main():
+
+    @st.cache_resource
+    def get_client():
+        client = MCPClient()
+        return client
+
     logger.info("Starting MCP Client application")
+    st.set_page_config(page_title="MCP Client", page_icon=":shark:")
+    if "server_connected" not in st.session_state:
+        st.session_state["server_connected"] = False
+
+    st.title("MCP Client")
+
+    with st.sidebar:
+        server_script_path = st.text_input("Server script path")
+        if st.button("Connect"):
+            client = get_client()
+            server_connected = await client.connect_to_server(server_script_path)
+            if server_connected:
+                st.session_state["server_connected"] = True
+                st.success("Connected to server")
+
+    if st.session_state["server_connected"]:
+        client = get_client()
+        for message in client.messages:
+            st.chat_message(message["role"]).markdown(message["content"])
+        query = st.chat_input("Enter your query here")
+        if query:
+            response = await client.process_query(query)
+            st.chat_message("assistant").markdown(response)
 
     if len(sys.argv) < 2:
         logger.error("No server script path provided")
@@ -251,7 +282,7 @@ async def main():
     client = MCPClient()
     try:
         await client.connect_to_server(sys.argv[1])
-        await client.chat_loop()
+
     except Exception as e:
         logger.critical(f"Critical error in main: {str(e)}")
         logger.debug(f"Main error details: {traceback.format_exc()}")
