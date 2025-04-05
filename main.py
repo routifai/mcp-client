@@ -46,10 +46,18 @@ class MCPClient:
         )
 
         await self.session.initialize()
-        self.tools = await self.list_mcp_tools()
-        print(f"Connected to server with tools: {self.tools}")
+        mcp_tools = await self.get_mcp_tools()
+        self.tools = [
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "input_schema": tool.inputSchema,
+            }
+            for tool in mcp_tools
+        ]
+        print(f"Connected to server with tools: {mcp_tools}")
 
-    async def list_mcp_tools(self):
+    async def get_mcp_tools(self):
         # List available tools
         response = await self.session.list_tools()
         tools = response.tools
@@ -59,15 +67,6 @@ class MCPClient:
         """Process a query using Claude and available tools"""
         self.messages.append({"role": "user", "content": query})
 
-        available_tools = [
-            {
-                "name": tool.name,
-                "description": tool.description,
-                "input_schema": tool.inputSchema,
-            }
-            for tool in self.tools
-        ]
-
         final_text = []
 
         while True:
@@ -76,35 +75,22 @@ class MCPClient:
                 model="claude-3-5-sonnet-20241022",
                 max_tokens=1000,
                 messages=self.messages,
-                tools=available_tools,
+                tools=self.tools,
             )
 
-            # Check if response contains only text
-            if len(response.content) == 1 and response.content[0].type == "text":
+            if response.content[0].type == "text" and len(response.content) == 1:
                 final_text.append(response.content[0].text)
-                self.messages.append({"role": "assistant", "content": response.content[0].text})
                 break
 
-            # Process response and handle tool calls
-            assistant_message_content = []
-            
             for content in response.content:
                 if content.type == "text":
                     final_text.append(content.text)
-                    assistant_message_content.append(content)
+                    self.messages.append({"role": "assistant", "content": content.text})
                 elif content.type == "tool_use":
                     tool_name = content.name
                     tool_args = content.input
-
-                    # Execute tool call
                     result = await self.session.call_tool(tool_name, tool_args)
-                    final_text.append(f"[Calling tool {tool_name} with args {tool_args}]")
-
-                    # Add tool use to message history
-                    assistant_message_content.append(content)
-                    self.messages.append(
-                        {"role": "assistant", "content": assistant_message_content}
-                    )
+                    final_text.append(result.content)
                     self.messages.append(
                         {
                             "role": "user",
@@ -118,7 +104,22 @@ class MCPClient:
                         }
                     )
 
-        return "\n".join(final_text)
+    def print_conversation(self):
+        """Print the entire conversation history"""
+        print("\n=== Conversation History ===")
+        for msg in self.messages:
+            role = msg["role"].capitalize()
+            if isinstance(msg["content"], str):
+                content = msg["content"]
+            elif isinstance(msg["content"], list):
+                if any(item.get("type") == "tool_result" for item in msg["content"]):
+                    content = "[Tool Result]"
+                else:
+                    content = "\n".join(
+                        item.text for item in msg["content"] if hasattr(item, "text")
+                    )
+            print(f"\n{role}: {content}")
+        print("\n=========================")
 
     async def chat_loop(self):
         """Run an interactive chat loop"""
@@ -134,6 +135,7 @@ class MCPClient:
 
                 response = await self.process_query(query)
                 print("\n" + response)
+                self.print_conversation()  # Show updated conversation after response
 
             except Exception as e:
                 print(f"\nError: {str(e)}")
