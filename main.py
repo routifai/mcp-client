@@ -268,11 +268,32 @@ async def main():
     if st.session_state["server_connected"]:
         client = get_client()
         for message in client.messages:
-            st.chat_message(message["role"]).markdown(message["content"])
+            if message["role"] == "user" and type(message["content"]) == str:
+                st.chat_message("user").markdown(message["content"])
+            elif message["role"] == "user" and type(message["content"]) == list:
+                for content in message["content"]:
+                    if content["type"] == "text":
+                        st.chat_message("user").markdown(content["text"])
+                    elif content["type"] == "tool_result":
+                        with st.chat_message("user"):
+                            st.write("Result from tool: " + content["tool_use_id"])
+                            st.json({"content": content["content"]}, expanded=False)
+            elif message["role"] == "assistant" and type(message["content"]) == str:
+                st.chat_message("assistant").markdown(message["content"])
+            elif message["role"] == "assistant" and type(message["content"]) == list:
+                for content in message["content"]:
+                    if content["type"] == "text":
+                        st.chat_message("assistant").markdown(content["text"])
+                    elif content["type"] == "tool_use":
+                        with st.chat_message("assistant"):
+                            st.write("using tool: " + content["name"])
+                            st.write("with args: " + str(content["input"]))
         query = st.chat_input("Enter your query here")
         if query:
+            st.chat_message("user").markdown(query)
             response = await client.process_query(query)
-            st.chat_message("assistant").markdown(response)
+            with st.chat_message("assistant"):
+                st.write(response)
 
     if len(sys.argv) < 2:
         logger.error("No server script path provided")
