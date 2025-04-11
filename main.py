@@ -189,112 +189,86 @@ class MCPClient:
             self.logger.error(f"Error during cleanup: {str(e)}")
 
 
-async def main():
+class Chatbot:
+    def __init__(self, client: MCPClient):
+        self.client = client
+        self.current_tool_call = {"name": None, "args": None}
 
+    def display_message(self, message: Message):
+        # display user message
+        if message["role"] == "user" and type(message["content"]) == str:
+            st.chat_message("user").markdown(message["content"])
+
+        # display tool result
+        if message["role"] == "user" and type(message["content"]) == list:
+            for content in message["content"]:
+                if content["type"] == "tool_result":
+                    with st.chat_message("assistant"):
+                        st.write(f"Called tool: {self.current_tool_call['name']}:")
+                        st.json(
+                            {
+                                "name": self.current_tool_call["name"],
+                                "args": self.current_tool_call["args"],
+                                "content": content["content"],
+                            },
+                            expanded=False,
+                        )
+
+        # display ai message
+        if message["role"] == "assistant" and type(message["content"]) == str:
+            st.chat_message("assistant").markdown(message["content"])
+
+        # store current ai tool use
+        if message["role"] == "assistant" and type(message["content"]) == list:
+            for content in message["content"]:
+                # ai tool use
+                if content["type"] == "tool_use":
+                    self.current_tool_call = {
+                        "name": content["name"],
+                        "args": content["input"],
+                    }
+
+    async def render(self):
+        st.set_page_config(page_title="MCP Client", page_icon=":shark:")
+        st.title("MCP Client")
+
+        with st.sidebar:
+            server_script_path = st.text_input(
+                "Server script path",
+                value="/Users/alejandro/repos/code/mcp/documentation/main.py",
+            )
+            if st.button("Connect"):
+                server_connected = await self.client.connect_to_server(
+                    server_script_path
+                )
+                if server_connected:
+                    st.session_state["server_connected"] = True
+                    st.success("Connected to server")
+
+        if st.session_state["server_connected"]:
+            client = self.client
+            # Display existing messages
+            for message in client.messages:
+                self.display_message(message)
+
+            # Handle new query
+            query = st.chat_input("Enter your query here")
+            if query:
+                async for message in client.process_query(query):
+                    self.display_message(message)
+
+
+async def main():
     @st.cache_resource
     def get_client():
         client = MCPClient()
         return client
 
-    logger.info("Starting MCP Client application")
-    st.set_page_config(page_title="MCP Client", page_icon=":shark:")
     if "server_connected" not in st.session_state:
         st.session_state["server_connected"] = False
 
-    st.title("MCP Client")
-
-    with st.sidebar:
-        server_script_path = st.text_input(
-            "Server script path",
-            value="/Users/alejandro/repos/code/mcp/documentation/main.py",
-        )
-        if st.button("Connect"):
-            client = get_client()
-            server_connected = await client.connect_to_server(server_script_path)
-            if server_connected:
-                st.session_state["server_connected"] = True
-                st.success("Connected to server")
-
-    if st.session_state["server_connected"]:
-        client = get_client()
-        # Display existing messages
-        for message in client.messages:
-            if message["role"] == "user" and type(message["content"]) == str:
-                st.chat_message("user").markdown(message["content"])
-            elif message["role"] == "user" and type(message["content"]) == list:
-                for content in message["content"]:
-                    if content["type"] == "text":
-                        pass
-                        # st.chat_message("user").markdown(content["text"])
-                    elif content["type"] == "tool_result":
-                        with st.chat_message("user"):
-                            st.write("Result from tool: " + content["tool_use_id"])
-                            st.json({"content": content["content"]}, expanded=False)
-            elif message["role"] == "assistant" and type(message["content"]) == str:
-                st.chat_message("assistant").markdown(message["content"])
-            elif message["role"] == "assistant" and type(message["content"]) == list:
-                for content in message["content"]:
-                    if content["type"] == "text":
-                        st.chat_message("assistant").markdown(content["text"])
-                    elif content["type"] == "tool_use":
-                        with st.chat_message("assistant"):
-                            st.write("using tool: " + content["name"])
-                            st.write("with args: " + str(content["input"]))
-
-        # Handle new query
-        query = st.chat_input("Enter your query here")
-        current_tool_call = {"name": None, "args": None}
-        if query:
-            # Process query and display messages as they are generated
-            async for message in client.process_query(query):
-                # display user message
-                if message["role"] == "user" and type(message["content"]) == str:
-                    st.chat_message("user").markdown(message["content"])
-
-                # display tool result
-                if message["role"] == "user" and type(message["content"]) == list:
-                    for content in message["content"]:
-                        if content["type"] == "tool_result":
-                            with st.chat_message("assistant"):
-                                st.write(f"Called tool: {current_tool_call['name']}:")
-                                st.json(
-                                    {
-                                        "name": current_tool_call["name"],
-                                        "args": current_tool_call["args"],
-                                        "content": content["content"],
-                                    },
-                                    expanded=False,
-                                )
-
-                # display ai message
-                if message["role"] == "assistant" and type(message["content"]) == str:
-                    st.chat_message("assistant").markdown(message["content"])
-
-                # store current ai tool use
-                if message["role"] == "assistant" and type(message["content"]) == list:
-                    for content in message["content"]:
-                        # ai tool use
-                        if content["type"] == "tool_use":
-                            current_tool_call = {
-                                "name": content["name"],
-                                "args": content["input"],
-                            }
-
-    if len(sys.argv) < 2:
-        logger.error("No server script path provided")
-        print("Usage: python client.py <path_to_server_script>")
-        sys.exit(1)
-
-    client = get_client()
-    try:
-        await client.connect_to_server(sys.argv[1])
-
-    except Exception as e:
-        logger.critical(f"Critical error in main: {str(e)}")
-        logger.debug(f"Main error details: {traceback.format_exc()}")
-        sys.exit(1)
-    finally:
-        await client.cleanup()
+    chatbot = Chatbot(get_client())
+    await chatbot.render()
 
 
 if __name__ == "__main__":
