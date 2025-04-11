@@ -1,11 +1,9 @@
 import asyncio
-import json
 import logging
 from typing import Optional
 from contextlib import AsyncExitStack
 import sys
 import traceback
-from datetime import datetime
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -26,24 +24,6 @@ logging.basicConfig(
 logger = logging.getLogger("MCPClient")
 
 load_dotenv()  # load environment variables from .env
-
-
-class MCPClientError(Exception):
-    """Base exception class for MCPClient errors"""
-
-    pass
-
-
-class ConnectionError(MCPClientError):
-    """Raised when there are connection issues"""
-
-    pass
-
-
-class ToolExecutionError(MCPClientError):
-    """Raised when there are issues executing tools"""
-
-    pass
 
 
 class MCPClient:
@@ -101,7 +81,7 @@ class MCPClient:
         except Exception as e:
             self.logger.error(f"Failed to connect to server: {str(e)}")
             self.logger.debug(f"Connection error details: {traceback.format_exc()}")
-            raise ConnectionError(f"Failed to connect to server: {str(e)}")
+            raise Exception(f"Failed to connect to server: {str(e)}")
 
     async def get_mcp_tools(self):
         try:
@@ -110,7 +90,7 @@ class MCPClient:
             return tools
         except Exception as e:
             self.logger.error(f"Failed to get MCP tools: {str(e)}")
-            raise ToolExecutionError(f"Failed to get tools: {str(e)}")
+            raise Exception(f"Failed to get tools: {str(e)}")
 
     async def call_llm(self) -> Message:
         """Call the LLM with the given query"""
@@ -123,7 +103,7 @@ class MCPClient:
             )
         except Exception as e:
             self.logger.error(f"Failed to call LLM: {str(e)}")
-            raise ToolExecutionError(f"Failed to call LLM: {str(e)}")
+            raise Exception(f"Failed to call LLM: {str(e)}")
 
     async def process_query(self, query: str):
         """Process a query using Claude and available tools, yielding each message as it's created"""
@@ -149,7 +129,6 @@ class MCPClient:
                     }
                     self.messages.append(assistant_message)
                     yield assistant_message
-                    self.log_conversation()
                     break
 
                 # For more complex responses with tool calls
@@ -159,7 +138,6 @@ class MCPClient:
                 }
                 self.messages.append(assistant_message)
                 yield assistant_message
-                self.log_conversation()
 
                 for content in response.content:
                     if content.type == "text":
@@ -193,9 +171,7 @@ class MCPClient:
                         except Exception as e:
                             error_msg = f"Tool execution failed: {str(e)}"
                             self.logger.error(error_msg)
-                            raise ToolExecutionError(error_msg)
-
-                self.log_conversation()
+                            raise Exception(error_msg)
 
         except Exception as e:
             self.logger.error(f"Error processing query: {str(e)}")
@@ -203,69 +179,6 @@ class MCPClient:
                 f"Query processing error details: {traceback.format_exc()}"
             )
             raise
-
-    def log_conversation(self):
-        """save conversation to a json file"""
-        try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"conversations/conversation_{timestamp}.json"
-            with open(filename, "w") as f:
-                json.dump(self.messages, f, indent=2)
-            self.logger.debug(f"Conversation logged to {filename}")
-        except Exception as e:
-            self.logger.error(f"Failed to log conversation: {str(e)}")
-
-    async def chat_loop(self):
-        """Run an interactive chat loop"""
-        self.logger.info("Starting chat loop")
-        print("\nMCP Client Started!")
-        print("Type your queries or 'quit' to exit.")
-
-        while True:
-            try:
-                query = input("\nQuery: ").strip()
-
-                if query.lower() == "quit":
-                    self.logger.info("User requested to quit")
-                    break
-
-                async for message in self.process_query(query):
-                    if message["role"] == "user" and type(message["content"]) == str:
-                        print(f"\nUser: {message['content']}")
-                    elif message["role"] == "user" and type(message["content"]) == list:
-                        for content in message["content"]:
-                            if content["type"] == "text":
-                                print(f"\nUser: {content['text']}")
-                            elif content["type"] == "tool_result":
-                                print(f"\nTool result ({content['tool_use_id']}):")
-                                print(content["content"])
-                    elif (
-                        message["role"] == "assistant"
-                        and type(message["content"]) == str
-                    ):
-                        print(f"\nAssistant: {message['content']}")
-                    elif (
-                        message["role"] == "assistant"
-                        and type(message["content"]) == list
-                    ):
-                        for content in message["content"]:
-                            if content["type"] == "text":
-                                print(f"\nAssistant: {content['text']}")
-                            elif content["type"] == "tool_use":
-                                print(f"\nAssistant using tool: {content['name']}")
-                                print(f"With args: {content['input']}")
-
-                self.log_conversation()
-
-            except KeyboardInterrupt:
-                self.logger.info("Received keyboard interrupt")
-                print("\nShutting down gracefully...")
-                break
-            except Exception as e:
-                self.logger.error(f"Error in chat loop: {str(e)}")
-                self.logger.debug(f"Chat loop error details: {traceback.format_exc()}")
-                print(f"\nError: {str(e)}")
-                print("Type 'quit' to exit or try another query")
 
     async def cleanup(self):
         """Clean up resources"""
@@ -330,38 +243,49 @@ async def main():
 
         # Handle new query
         query = st.chat_input("Enter your query here")
+        current_tool_call = {"name": None, "args": None}
         if query:
             # Process query and display messages as they are generated
             async for message in client.process_query(query):
+                # display user message
                 if message["role"] == "user" and type(message["content"]) == str:
                     st.chat_message("user").markdown(message["content"])
-                elif message["role"] == "user" and type(message["content"]) == list:
+
+                # display tool result
+                if message["role"] == "user" and type(message["content"]) == list:
                     for content in message["content"]:
-                        if content["type"] == "text":
-                            st.chat_message("user").markdown(content["text"])
-                        elif content["type"] == "tool_result":
-                            with st.chat_message("user"):
-                                st.write("Result from tool: " + content["tool_use_id"])
-                                st.json({"content": content["content"]}, expanded=False)
-                elif message["role"] == "assistant" and type(message["content"]) == str:
-                    st.chat_message("assistant").markdown(message["content"])
-                elif (
-                    message["role"] == "assistant" and type(message["content"]) == list
-                ):
-                    for content in message["content"]:
-                        if content["type"] == "text":
-                            st.chat_message("assistant").markdown(content["text"])
-                        elif content["type"] == "tool_use":
+                        if content["type"] == "tool_result":
                             with st.chat_message("assistant"):
-                                st.write("using tool: " + content["name"])
-                                st.write("with args: " + str(content["input"]))
+                                st.write(f"Called tool: {current_tool_call['name']}:")
+                                st.json(
+                                    {
+                                        "name": current_tool_call["name"],
+                                        "args": current_tool_call["args"],
+                                        "content": content["content"],
+                                    },
+                                    expanded=False,
+                                )
+
+                # display ai message
+                if message["role"] == "assistant" and type(message["content"]) == str:
+                    st.chat_message("assistant").markdown(message["content"])
+
+                # store current ai tool use
+                if message["role"] == "assistant" and type(message["content"]) == list:
+                    for content in message["content"]:
+                        # ai tool use
+                        if content["type"] == "tool_use":
+                            current_tool_call = {
+                                "name": content["name"],
+                                "args": content["input"],
+                            }
 
     if len(sys.argv) < 2:
         logger.error("No server script path provided")
         print("Usage: python client.py <path_to_server_script>")
         sys.exit(1)
 
-    client = MCPClient()
+    client = get_client()
     try:
         await client.connect_to_server(sys.argv[1])
 
