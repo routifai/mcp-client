@@ -144,8 +144,8 @@ class MCPClient:
                 # If it's a simple text response
                 if response.content[0].type == "text" and len(response.content) == 1:
                     assistant_message = {
-                        "role": "assistant", 
-                        "content": response.content[0].text
+                        "role": "assistant",
+                        "content": response.content[0].text,
                     }
                     self.messages.append(assistant_message)
                     yield assistant_message
@@ -155,7 +155,7 @@ class MCPClient:
                 # For more complex responses with tool calls
                 assistant_message = {
                     "role": "assistant",
-                    "content": response.to_dict()["content"]
+                    "content": response.to_dict()["content"],
                 }
                 self.messages.append(assistant_message)
                 yield assistant_message
@@ -164,10 +164,7 @@ class MCPClient:
                 for content in response.content:
                     if content.type == "text":
                         # Text content within a complex response
-                        text_message = {
-                            "role": "assistant",
-                            "content": content.text
-                        }
+                        text_message = {"role": "assistant", "content": content.text}
                         yield text_message
                     elif content.type == "tool_use":
                         tool_name = content.name
@@ -242,9 +239,15 @@ class MCPClient:
                             elif content["type"] == "tool_result":
                                 print(f"\nTool result ({content['tool_use_id']}):")
                                 print(content["content"])
-                    elif message["role"] == "assistant" and type(message["content"]) == str:
+                    elif (
+                        message["role"] == "assistant"
+                        and type(message["content"]) == str
+                    ):
                         print(f"\nAssistant: {message['content']}")
-                    elif message["role"] == "assistant" and type(message["content"]) == list:
+                    elif (
+                        message["role"] == "assistant"
+                        and type(message["content"]) == list
+                    ):
                         for content in message["content"]:
                             if content["type"] == "text":
                                 print(f"\nAssistant: {content['text']}")
@@ -288,7 +291,10 @@ async def main():
     st.title("MCP Client")
 
     with st.sidebar:
-        server_script_path = st.text_input("Server script path", value="/Users/alejandro/repos/code/mcp/documentation/main.py")
+        server_script_path = st.text_input(
+            "Server script path",
+            value="/Users/alejandro/repos/code/mcp/documentation/main.py",
+        )
         if st.button("Connect"):
             client = get_client()
             server_connected = await client.connect_to_server(server_script_path)
@@ -305,7 +311,8 @@ async def main():
             elif message["role"] == "user" and type(message["content"]) == list:
                 for content in message["content"]:
                     if content["type"] == "text":
-                        st.chat_message("user").markdown(content["text"])
+                        pass
+                        # st.chat_message("user").markdown(content["text"])
                     elif content["type"] == "tool_result":
                         with st.chat_message("user"):
                             st.write("Result from tool: " + content["tool_use_id"])
@@ -320,7 +327,7 @@ async def main():
                         with st.chat_message("assistant"):
                             st.write("using tool: " + content["name"])
                             st.write("with args: " + str(content["input"]))
-        
+
         # Handle new query
         query = st.chat_input("Enter your query here")
         if query:
@@ -338,7 +345,9 @@ async def main():
                                 st.json({"content": content["content"]}, expanded=False)
                 elif message["role"] == "assistant" and type(message["content"]) == str:
                     st.chat_message("assistant").markdown(message["content"])
-                elif message["role"] == "assistant" and type(message["content"]) == list:
+                elif (
+                    message["role"] == "assistant" and type(message["content"]) == list
+                ):
                     for content in message["content"]:
                         if content["type"] == "text":
                             st.chat_message("assistant").markdown(content["text"])
