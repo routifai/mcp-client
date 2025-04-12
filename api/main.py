@@ -1,10 +1,9 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Dict, Any, Optional
-import asyncio
+from typing import Dict, Any
 from contextlib import asynccontextmanager
-from api.client import MCPClient
+from client import MCPClient
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
 
@@ -76,8 +75,9 @@ async def process_query(request: QueryRequest):
     """Process a query and return the response"""
     try:
         messages = []
-        async for message in app.state.client.process_query(request.query):
-            messages.append(message)
+        messages = await app.state.client.process_query(request.query)
+        # async for message in app.state.client.process_query(request.query):
+        #     messages.append(message)
         return {"messages": messages}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

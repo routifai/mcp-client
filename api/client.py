@@ -4,8 +4,8 @@ import traceback
 from utils.logger import logger
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-
-from test_data import test_tool_result_content
+from datetime import datetime
+import json
 
 from anthropic import Anthropic
 from anthropic.types import Message
@@ -103,16 +103,17 @@ class MCPClient:
             raise Exception(f"Failed to call LLM: {str(e)}")
 
     async def process_query(self, query: str):
-        """Process a query using Claude and available tools, yielding each message as it's created"""
+        """Process a query using Claude and available tools, returning all messages at the end"""
         try:
             self.logger.info(
                 f"Processing new query: {query[:100]}..."
             )  # Log first 100 chars of query
 
-            # Yield the initial user message
+            # Add the initial user message
             user_message = {"role": "user", "content": query}
             self.messages.append(user_message)
-            yield user_message
+            self.log_conversation(self.messages)
+            messages = [user_message]
 
             while True:
                 self.logger.debug("Calling Claude API")
@@ -125,7 +126,8 @@ class MCPClient:
                         "content": response.content[0].text,
                     }
                     self.messages.append(assistant_message)
-                    yield assistant_message
+                    self.log_conversation(self.messages)
+                    messages.append(assistant_message)
                     break
 
                 # For more complex responses with tool calls
@@ -134,13 +136,15 @@ class MCPClient:
                     "content": response.to_dict()["content"],
                 }
                 self.messages.append(assistant_message)
-                yield assistant_message
+                self.log_conversation(self.messages)
+                messages.append(assistant_message)
 
                 for content in response.content:
                     if content.type == "text":
                         # Text content within a complex response
                         text_message = {"role": "assistant", "content": content.text}
-                        yield text_message
+                        self.log_conversation(self.messages)
+                        messages.append(text_message)
                     elif content.type == "tool_use":
                         tool_name = content.name
                         tool_args = content.input
@@ -165,11 +169,14 @@ class MCPClient:
                                 ],
                             }
                             self.messages.append(tool_result_message)
-                            yield tool_result_message
+                            self.log_conversation(self.messages)
+                            messages.append(tool_result_message)
                         except Exception as e:
                             error_msg = f"Tool execution failed: {str(e)}"
                             self.logger.error(error_msg)
                             raise Exception(error_msg)
+
+            return messages
 
         except Exception as e:
             self.logger.error(f"Error processing query: {str(e)}")
@@ -177,6 +184,12 @@ class MCPClient:
                 f"Query processing error details: {traceback.format_exc()}"
             )
             raise
+
+    async def log_conversation(self, conversation: list):
+        """Log the conversation to json file"""
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        with open(f"conversations/conversation_{timestamp}.json", "w") as f:
+            json.dump(conversation, f)
 
     async def cleanup(self):
         """Clean up resources"""
