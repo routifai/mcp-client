@@ -1,7 +1,7 @@
 from typing import Optional
 from contextlib import AsyncExitStack
 import traceback
-from logger import logger
+from utils.logger import logger
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
@@ -20,6 +20,15 @@ class MCPClient:
         self.tools = []
         self.messages = []
         self.logger = logger
+
+    async def call_tool(self, tool_name: str, tool_args: dict):
+        """Call a tool with the given name and arguments"""
+        try:
+            result = await self.session.call_tool(tool_name, tool_args)
+            return result
+        except Exception as e:
+            self.logger.error(f"Failed to call tool: {str(e)}")
+            raise Exception(f"Failed to call tool: {str(e)}")
 
     async def connect_to_server(self, server_script_path: str):
         """Connect to an MCP server
@@ -70,11 +79,14 @@ class MCPClient:
 
     async def get_mcp_tools(self):
         try:
+            self.logger.info("Requesting MCP tools from the server.")
             response = await self.session.list_tools()
             tools = response.tools
+            self.logger.info(f"Received tools: {tools}")
             return tools
         except Exception as e:
             self.logger.error(f"Failed to get MCP tools: {str(e)}")
+            self.logger.debug(f"Error details: {traceback.format_exc()}")
             raise Exception(f"Failed to get tools: {str(e)}")
 
     async def call_llm(self) -> Message:
@@ -139,15 +151,16 @@ class MCPClient:
                         )
                         try:
                             # turn this one return a simple string
-                            # result = await self.session.call_tool(tool_name, tool_args)
-                            result = test_tool_result_content
+                            result = await self.session.call_tool(tool_name, tool_args)
+                            self.logger.info(f"Tool result: {result}")
+                            # result = test_tool_result_content
                             tool_result_message = {
                                 "role": "user",
                                 "content": [
                                     {
                                         "type": "tool_result",
                                         "tool_use_id": tool_use_id,
-                                        "content": result,
+                                        "content": result.content,
                                     }
                                 ],
                             }

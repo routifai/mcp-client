@@ -1,5 +1,5 @@
-from logger import logger
-from client import MCPClient
+from utils.logger import logger
+from api.client import MCPClient
 from anthropic.types import Message
 import streamlit as st
 
@@ -59,14 +59,37 @@ class Chatbot:
                     st.session_state["server_connected"] = True
                     st.success("Connected to server")
 
-        if st.session_state["server_connected"]:
-            client = self.client
-            # Display existing messages
-            for message in client.messages:
-                self.display_message(message)
+                    st.session_state["tools"] = await self.client.get_mcp_tools()
 
-            # Handle new query
-            query = st.chat_input("Enter your query here")
-            if query:
-                async for message in client.process_query(query):
-                    self.display_message(message)
+                    st.subheader("Available tools:")
+                    st.json(
+                        [
+                            {
+                                "tool_name": tool.name,
+                            }
+                            for tool in st.session_state["tools"]
+                        ],
+                        expanded=True,
+                    )
+
+                    st.subheader("Test tool result")
+                    if st.button("Test tool"):
+                        tool_result = await self.client.call_tool(
+                            "search_docs",
+                            {
+                                "query": "Chroma DB connection setup",
+                                "library": "langchain",
+                            },
+                        )
+                        st.write(tool_result)
+
+        client = self.client
+        # Display existing messages
+        for message in client.messages:
+            self.display_message(message)
+
+        # Handle new query
+        query = st.chat_input("Enter your query here")
+        if query:
+            async for message in client.process_query(query):
+                self.display_message(message)

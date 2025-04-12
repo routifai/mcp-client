@@ -175,3 +175,4 @@ cython_debug/
 
 # chat logs and debug
 conversation*
+tool-results/*

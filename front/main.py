@@ -1,9 +1,9 @@
 import asyncio
-from logger import logger
-from client import MCPClient
+from utils.logger import logger
+from api.client import MCPClient
 from dotenv import load_dotenv
 import streamlit as st
-from chatbot import Chatbot
+from front.chatbot import Chatbot
 
 load_dotenv()  # load environment variables from .env
 
@@ -13,10 +13,13 @@ async def main():
     def get_client():
         client = MCPClient()
         return client
-
+      
     if "server_connected" not in st.session_state:
         st.session_state["server_connected"] = False
-        
+
+    if "tools" not in st.session_state:
+        st.session_state["tools"] = []
+
     st.set_page_config(page_title="MCP Client", page_icon=":shark:")
 
     chatbot = Chatbot(get_client())
