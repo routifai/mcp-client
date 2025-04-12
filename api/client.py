@@ -6,6 +6,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from datetime import datetime
 import json
+import os
 
 from anthropic import Anthropic
 from anthropic.types import Message
@@ -112,7 +113,7 @@ class MCPClient:
             # Add the initial user message
             user_message = {"role": "user", "content": query}
             self.messages.append(user_message)
-            self.log_conversation(self.messages)
+            # await self.log_conversation(self.messages)
             messages = [user_message]
 
             while True:
@@ -126,7 +127,7 @@ class MCPClient:
                         "content": response.content[0].text,
                     }
                     self.messages.append(assistant_message)
-                    self.log_conversation(self.messages)
+                    # await self.log_conversation(self.messages)
                     messages.append(assistant_message)
                     break
 
@@ -136,14 +137,14 @@ class MCPClient:
                     "content": response.to_dict()["content"],
                 }
                 self.messages.append(assistant_message)
-                self.log_conversation(self.messages)
+                # await self.log_conversation(self.messages)
                 messages.append(assistant_message)
 
                 for content in response.content:
                     if content.type == "text":
                         # Text content within a complex response
                         text_message = {"role": "assistant", "content": content.text}
-                        self.log_conversation(self.messages)
+                        # await self.log_conversation(self.messages)
                         messages.append(text_message)
                     elif content.type == "tool_use":
                         tool_name = content.name
@@ -169,7 +170,7 @@ class MCPClient:
                                 ],
                             }
                             self.messages.append(tool_result_message)
-                            self.log_conversation(self.messages)
+                            # await self.log_conversation(self.messages)
                             messages.append(tool_result_message)
                         except Exception as e:
                             error_msg = f"Tool execution failed: {str(e)}"
@@ -187,9 +188,13 @@ class MCPClient:
 
     async def log_conversation(self, conversation: list):
         """Log the conversation to json file"""
+        # Create conversations directory if it doesn't exist
+        os.makedirs("conversations", exist_ok=True)
+
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        with open(f"conversations/conversation_{timestamp}.json", "w") as f:
-            json.dump(conversation, f)
+        filepath = os.path.join("conversations", f"conversation_{timestamp}.json")
+        with open(filepath, "w") as f:
+            json.dump(conversation, f, indent=2)
 
     async def cleanup(self):
         """Clean up resources"""

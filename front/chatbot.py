@@ -55,11 +55,12 @@ class Chatbot:
         # Handle new query
         query = st.chat_input("Enter your query here")
         if query:
-            st.chat_message("user").markdown(query)
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
                 try:
                     response = await client.post(
-                        f"{self.api_url}/query", json={"query": query}
+                        f"{self.api_url}/query",
+                        json={"query": query},
+                        headers={"Content-Type": "application/json"},
                     )
                     if response.status_code == 200:
                         messages = response.json()["messages"]
