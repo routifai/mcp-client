@@ -113,7 +113,7 @@ class MCPClient:
             # Add the initial user message
             user_message = {"role": "user", "content": query}
             self.messages.append(user_message)
-            # await self.log_conversation(self.messages)
+            await self.log_conversation(self.messages)
             messages = [user_message]
 
             while True:
@@ -127,7 +127,7 @@ class MCPClient:
                         "content": response.content[0].text,
                     }
                     self.messages.append(assistant_message)
-                    # await self.log_conversation(self.messages)
+                    await self.log_conversation(self.messages)
                     messages.append(assistant_message)
                     break
 
@@ -137,14 +137,14 @@ class MCPClient:
                     "content": response.to_dict()["content"],
                 }
                 self.messages.append(assistant_message)
-                # await self.log_conversation(self.messages)
+                await self.log_conversation(self.messages)
                 messages.append(assistant_message)
 
                 for content in response.content:
                     if content.type == "text":
                         # Text content within a complex response
                         text_message = {"role": "assistant", "content": content.text}
-                        # await self.log_conversation(self.messages)
+                        await self.log_conversation(self.messages)
                         messages.append(text_message)
                     elif content.type == "tool_use":
                         tool_name = content.name
@@ -170,7 +170,7 @@ class MCPClient:
                                 ],
                             }
                             self.messages.append(tool_result_message)
-                            # await self.log_conversation(self.messages)
+                            await self.log_conversation(self.messages)
                             messages.append(tool_result_message)
                         except Exception as e:
                             error_msg = f"Tool execution failed: {str(e)}"
@@ -191,10 +191,45 @@ class MCPClient:
         # Create conversations directory if it doesn't exist
         os.makedirs("conversations", exist_ok=True)
 
+        # Convert conversation to JSON-serializable format
+        serializable_conversation = []
+        for message in conversation:
+            try:
+                serializable_message = {
+                    "role": message["role"],
+                    "content": []
+                }
+                
+                # Handle both string and list content
+                if isinstance(message["content"], str):
+                    serializable_message["content"] = message["content"]                  
+                elif isinstance(message["content"], list):
+                    for content_item in message["content"]:
+                        if hasattr(content_item, 'to_dict'):
+                            serializable_message["content"].append(content_item.to_dict())
+                        elif hasattr(content_item, 'dict'):
+                            serializable_message["content"].append(content_item.dict())
+                        elif hasattr(content_item, 'model_dump'):
+                            serializable_message["content"].append(content_item.model_dump())
+                        else:
+                            serializable_message["content"].append(content_item)
+                
+                serializable_conversation.append(serializable_message)
+            except Exception as e:
+                self.logger.error(f"Error processing message: {str(e)}")
+                self.logger.debug(f"Message content: {message}")
+                raise
+
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         filepath = os.path.join("conversations", f"conversation_{timestamp}.json")
-        with open(filepath, "w") as f:
-            json.dump(conversation, f, indent=2)
+        
+        try:
+            with open(filepath, "w") as f:
+                json.dump(serializable_conversation, f, indent=2, default=str)
+        except Exception as e:
+            self.logger.error(f"Error writing conversation to file: {str(e)}")
+            self.logger.debug(f"Serializable conversation: {serializable_conversation}")
+            raise
 
     async def cleanup(self):
         """Clean up resources"""
