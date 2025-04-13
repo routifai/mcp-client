@@ -4,8 +4,8 @@ from typing import Dict, Any
 
 
 class Chatbot:
-    def __init__(self):
-        self.api_url = "http://localhost:8000"
+    def __init__(self, api_url: str):
+        self.api_url = api_url
         self.current_tool_call = {"name": None, "args": None}
         self.messages = []
 
@@ -43,11 +43,24 @@ class Chatbot:
                         "args": content["input"],
                     }
 
+    async def get_tools(self):
+        async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
+            response = await client.get(
+                f"{self.api_url}/tools",
+                headers={"Content-Type": "application/json"},
+            )
+            return response.json()
+
     async def render(self):
         st.title("MCP Client")
 
         with st.sidebar:
-            st.write("MCP Client")
+            st.subheader("Settings")
+            st.write("API URL: ", self.api_url)
+            result = await self.get_tools()
+            st.subheader("Tools")
+            st.write([tool["name"] for tool in result["tools"]])
+
         # Display existing messages
         for message in self.messages:
             self.display_message(message)

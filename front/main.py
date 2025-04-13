@@ -10,10 +10,12 @@ async def main():
 
     if "tools" not in st.session_state:
         st.session_state["tools"] = []
+        
+    API_URL = "http://localhost:8000"
 
     st.set_page_config(page_title="MCP Client", page_icon=":shark:")
 
-    chatbot = Chatbot()
+    chatbot = Chatbot(API_URL)
     await chatbot.render()
 
 
