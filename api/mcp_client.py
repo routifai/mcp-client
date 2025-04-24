@@ -83,7 +83,6 @@ class MCPClient:
             self.logger.info("Requesting MCP tools from the server.")
             response = await self.session.list_tools()
             tools = response.tools
-            self.logger.info(f"Received tools: {tools}")
             return tools
         except Exception as e:
             self.logger.error(f"Failed to get MCP tools: {str(e)}")

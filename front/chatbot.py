@@ -1,13 +1,14 @@
 import streamlit as st
 import httpx
 from typing import Dict, Any
+import json
 
 
 class Chatbot:
     def __init__(self, api_url: str):
         self.api_url = api_url
         self.current_tool_call = {"name": None, "args": None}
-        self.messages = []
+        self.messages = st.session_state["messages"]
 
     def display_message(self, message: Dict[str, Any]):
         # display user message
@@ -24,7 +25,7 @@ class Chatbot:
                             {
                                 "name": self.current_tool_call["name"],
                                 "args": self.current_tool_call["args"],
-                                "content": content["content"],
+                                "content": json.loads(content["content"][0]["text"]),
                             },
                             expanded=False,
                         )
