@@ -69,7 +69,7 @@ class Chatbot:
         # Handle new query
         query = st.chat_input("Enter your query here")
         if query:
-            async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
+            async with httpx.AsyncClient(timeout=60.0, verify=False) as client:
                 try:
                     response = await client.post(
                         f"{self.api_url}/query",
@@ -82,4 +82,4 @@ class Chatbot:
                         for message in st.session_state["messages"]:
                             self.display_message(message)
                 except Exception as e:
-                    st.error(f"Error processing query: {str(e)}")
+                    st.error(f"Frontend: Error processing query: {str(e)}")
