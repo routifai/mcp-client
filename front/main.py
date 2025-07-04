@@ -14,7 +14,8 @@ async def main():
     if "messages" not in st.session_state:
         st.session_state["messages"] = []
         
-    API_URL = "http://localhost:8000"
+    # API URL pointing to the API server
+    API_URL = "http://localhost:8001"
 
     st.set_page_config(page_title="MCP Client", page_icon=":shark:")
 

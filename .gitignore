@@ -176,3 +176,26 @@ cython_debug/
 # chat logs and debug
 conversation*
 tool-results/*
+
+# MCP Client specific
+mcp_client.log
+api/mcp_client.log
+front/mcp_client.log
+
+# Conversation logs
+api/conversations/
+conversations/
+
+# Virtual environments
+api/venv/
+venv/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
